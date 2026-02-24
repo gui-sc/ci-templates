@@ -1,4 +1,4 @@
-name: Node TS + Docker (Reusable)
+name: Node TS + DockerHub (Reusable)
 
 on:
   workflow_call:
@@ -6,9 +6,10 @@ on:
       node_version:
         type: string
         default: "20"
-      image_name:
+      # opcional: se não mandar, usa o nome do repo do GitHub automaticamente
+      image_repo:
         type: string
-        required: true
+        required: false
       dockerfile:
         type: string
         default: "./Dockerfile"
@@ -42,32 +43,42 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci]
 
-    # publica só em push (não PR) e opcionalmente só na branch default
     if: >
       github.event_name == 'push' &&
       (inputs.push_on_default_branch == false || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
+      - name: Login no Docker Hub
 
       - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Definir nome da imagem
+        id: img
+        run: |
+          # Se não vier input, usa nome do repo do GitHub
+          REPO="${{ inputs.image_repo }}"
+          if [ -z "$REPO" ]; then
+            REPO="${{ github.event.repository.name }}"
+          fi
+          echo "image=${{ secrets.DOCKERHUB_USERNAME }}/$REPO" >> $GITHUB_OUTPUT
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ inputs.image_name }}
+          images: ${{ steps.img.outputs.image }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
             type=ref,event=tag
 
-      - uses: docker/build-push-action@v6
+      - name: Build & Push
+        uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
